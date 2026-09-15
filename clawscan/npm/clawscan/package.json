@@ -1,0 +1,41 @@
+{
+  "name": "@openclaw/clawscan",
+  "version": "0.0.0-dev",
+  "description": "Benchmarkable security scanner harness for agent skills.",
+  "homepage": "https://github.com/openclaw/clawscan#readme",
+  "bugs": {
+    "url": "https://github.com/openclaw/clawscan/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openclaw/clawscan.git"
+  },
+  "bin": {
+    "clawscan": "./bin/clawscan.js"
+  },
+  "files": [
+    "bin/",
+    "binaries/",
+    "lib/",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    "./resolve-binary": {
+      "types": "./lib/resolve-binary.d.mts",
+      "import": "./lib/resolve-binary.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

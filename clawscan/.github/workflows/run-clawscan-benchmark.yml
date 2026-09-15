@@ -1,0 +1,278 @@
+name: Run ClawScan Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      benchmark_id:
+        description: Benchmark ID or alias, for example clawhub-security-signals or SkillTrustBench.
+        required: true
+        default: clawhub-security-signals
+      profile:
+        description: Profile to run. Leave empty to use --scanner values instead.
+        required: false
+        default: clawhub
+      config_path:
+        description: Optional .clawscan.yml path. Requires profile.
+        required: false
+        default: ""
+      scanners:
+        description: Optional comma/space-separated scanners when profile is empty.
+        required: false
+        default: ""
+      split:
+        description: Optional benchmark split. Empty uses the benchmark default.
+        required: false
+        default: ""
+      ids:
+        description: Optional benchmark ID source. Accepts a local text/JSONL path or HTTP(S) JSONL URL.
+        required: false
+        default: ""
+      limit:
+        description: Row limit. Use 0 for the full split.
+        required: false
+        default: "10"
+      offset:
+        description: Row offset for reproducible chunks.
+        required: false
+        default: "0"
+      predictions_output:
+        description: Optional predictions JSONL path for clawhub-security-signals.
+        required: false
+        default: ""
+      output_path:
+        description: Benchmark artifact JSON path.
+        required: false
+        default: ./artifacts/clawscan-benchmark.json
+      artifact_name:
+        description: Uploaded artifact name.
+        required: false
+        default: clawscan-benchmark
+      sandbox:
+        description: ClawScan command sandbox mode.
+        required: false
+        default: docker
+        type: choice
+        options:
+          - docker
+          - off
+      sandbox_image:
+        description: Docker runtime image when sandbox is docker.
+        required: false
+        default: ghcr.io/openclaw/clawscan-runtime:latest
+      pr_number:
+        description: Optional PR number to checkout before running.
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      benchmark_id:
+        type: string
+        required: true
+      profile:
+        type: string
+        required: false
+        default: clawhub
+      config_path:
+        type: string
+        required: false
+        default: ""
+      scanners:
+        type: string
+        required: false
+        default: ""
+      split:
+        type: string
+        required: false
+        default: ""
+      ids:
+        type: string
+        required: false
+        default: ""
+      limit:
+        type: string
+        required: false
+        default: "10"
+      offset:
+        type: string
+        required: false
+        default: "0"
+      predictions_output:
+        type: string
+        required: false
+        default: ""
+      output_path:
+        type: string
+        required: false
+        default: ./artifacts/clawscan-benchmark.json
+      artifact_name:
+        type: string
+        required: false
+        default: clawscan-benchmark
+      sandbox:
+        type: string
+        required: false
+        default: docker
+      sandbox_image:
+        type: string
+        required: false
+        default: ghcr.io/openclaw/clawscan-runtime:latest
+      pr_number:
+        type: string
+        required: false
+        default: ""
+    secrets:
+      LLM_API_KEY:
+        required: false
+      DEFAULT_MODEL:
+        required: false
+      DEFAULT_BASE_URL:
+        required: false
+      DEFAULT_MODEL_CONTEXT_WINDOW:
+        required: false
+      LOG_LEVEL:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      CODEX_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+      SNYK_TOKEN:
+        required: false
+      SOCKET_CLI_API_TOKEN:
+        required: false
+      VIRUSTOTAL_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  benchmark:
+    name: Run ${{ inputs.benchmark_id }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Checkout pull request branch
+        if: ${{ inputs.pr_number != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: gh pr checkout "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build ClawScan
+        run: go build -o ./dist/clawscan ./cmd/clawscan
+
+      - name: Pull ClawScan runtime image
+        if: ${{ inputs.sandbox == 'docker' }}
+        env:
+          CLAWSCAN_SANDBOX_IMAGE: ${{ inputs.sandbox_image }}
+        run: docker pull "$CLAWSCAN_SANDBOX_IMAGE"
+
+      - name: Run benchmark
+        env:
+          BENCHMARK_ID: ${{ inputs.benchmark_id }}
+          PROFILE: ${{ inputs.profile }}
+          CONFIG_PATH: ${{ inputs.config_path }}
+          SCANNERS: ${{ inputs.scanners }}
+          SPLIT: ${{ inputs.split }}
+          IDS: ${{ inputs.ids }}
+          LIMIT: ${{ inputs.limit }}
+          OFFSET: ${{ inputs.offset }}
+          PREDICTIONS_OUTPUT: ${{ inputs.predictions_output }}
+          OUTPUT_PATH: ${{ inputs.output_path }}
+          CLAWSCAN_SANDBOX: ${{ inputs.sandbox }}
+          CLAWSCAN_SANDBOX_IMAGE: ${{ inputs.sandbox_image }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          DEFAULT_MODEL: ${{ secrets.DEFAULT_MODEL }}
+          DEFAULT_BASE_URL: ${{ secrets.DEFAULT_BASE_URL }}
+          DEFAULT_MODEL_CONTEXT_WINDOW: ${{ secrets.DEFAULT_MODEL_CONTEXT_WINDOW }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SOCKET_CLI_API_TOKEN: ${{ secrets.SOCKET_CLI_API_TOKEN }}
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$OUTPUT_PATH")"
+
+          args=(benchmark "$BENCHMARK_ID" --output "$OUTPUT_PATH")
+          if [ -n "$SPLIT" ]; then
+            args+=(--split "$SPLIT")
+          fi
+          if [ -n "$IDS" ]; then
+            args+=(--ids "$IDS")
+          else
+            args+=(--limit "$LIMIT" --offset "$OFFSET")
+          fi
+          if [ -n "$PREDICTIONS_OUTPUT" ]; then
+            mkdir -p "$(dirname "$PREDICTIONS_OUTPUT")"
+            args+=(--predictions-output "$PREDICTIONS_OUTPUT")
+          fi
+          if [ -n "$CONFIG_PATH" ]; then
+            args+=(--config "$CONFIG_PATH")
+          fi
+          if [ -n "$PROFILE" ]; then
+            args+=(--profile "$PROFILE")
+          else
+            read -r -a scanners <<<"$(printf '%s' "$SCANNERS" | tr ',' ' ')"
+            if [ "${#scanners[@]}" -eq 0 ]; then
+              echo "Either profile or scanners must be set." >&2
+              exit 1
+            fi
+            for scanner in "${scanners[@]}"; do
+              args+=(--scanner "$scanner")
+            done
+          fi
+
+          ./dist/clawscan "${args[@]}"
+
+      - name: Summarize benchmark
+        if: always()
+        env:
+          OUTPUT_PATH: ${{ inputs.output_path }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+        run: |
+          {
+            echo "## ClawScan benchmark"
+            echo
+            echo "- Artifact: \`$ARTIFACT_NAME\`"
+            echo "- Output path: \`$OUTPUT_PATH\`"
+            if [ -f "$OUTPUT_PATH" ]; then
+              echo
+              echo "### Summary"
+              jq -r '
+                "- benchmark: \(.benchmark.id) (\(.benchmark.split) split)",
+                "- ids: \(.benchmark.idsCount // 0) from \(.benchmark.idsSource // "not set")",
+                "- cases: \(.summary.caseCount // 0)",
+                "- correct: \(.summary.evaluation.correct // 0)",
+                "- incorrect: \(.summary.evaluation.incorrect // 0)",
+                "- abstained: \(.summary.evaluation.abstained // 0)",
+                "- errors: \(.summary.evaluation.errors // 0)"
+              ' "$OUTPUT_PATH"
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: |
+            ./artifacts/**
+            ${{ inputs.output_path }}
+            ${{ inputs.predictions_output }}
+          if-no-files-found: error
